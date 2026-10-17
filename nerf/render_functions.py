@@ -40,7 +40,7 @@ def get_device():
     return device
 
 def get_points_renderer(
-    image_size=512, device=None, radius=0.01, background_color=(1, 1, 1)
+    image_size=512, device=None, radius=0.01, background_color=(0, 0, 0)
 ):
     """
     Returns a Pytorch3D renderer for point clouds.
@@ -93,13 +93,12 @@ def render_points(filename, points, image_size=256, color=[0.7, 0.7, 1], device=
 
     R, T = look_at_view_transform(10.0, 10.0, 96)
 
-
     # Prepare the camera:
     cameras = OpenGLPerspectiveCameras(
         R=R,T=T, device=device
     )
 
-    rend = points_renderer(point_cloud.extend(2), cameras=cameras)
+    rend = points_renderer(point_cloud, cameras=cameras)
 
 
     # Place a point light in front of the cow.

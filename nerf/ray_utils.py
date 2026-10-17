@@ -88,11 +88,11 @@ def sample_images_at_xy(
 def get_pixels_from_image(image_size, camera):
     W, H = image_size[0], image_size[1]
 
-    # TODO (Q1.3): Generate pixel coordinates from [0, W] in x and [0, H] in y
-    pass
+    x = torch.arange(W, dtype=torch.float32, device=camera.device)
+    y = torch.arange(H, dtype=torch.float32, device=camera.device)
 
-    # TODO (Q1.3): Convert to the range [-1, 1] in both x and y
-    pass
+    x = x * 2 / (W - 1) - 1
+    y = y * 2 / (H - 1) - 1
 
     # Create grid of coordinates
     xy_grid = torch.stack(
@@ -107,8 +107,12 @@ def get_pixels_from_image(image_size, camera):
 def get_random_pixels_from_image(n_pixels, image_size, camera):
     xy_grid = get_pixels_from_image(image_size, camera)
     
-    # TODO (Q2.1): Random subsampling of pixel coordinaters
-    pass
+    indices = torch.randperm(
+        xy_grid.shape[0],
+        device=xy_grid.device,
+    )
+
+    xy_grid_sub = xy_grid[indices]
 
     # Return
     return xy_grid_sub.reshape(-1, 2)[:n_pixels]
@@ -118,8 +122,10 @@ def get_random_pixels_from_image(n_pixels, image_size, camera):
 def get_rays_from_pixels(xy_grid, image_size, camera):
     W, H = image_size[0], image_size[1]
 
-    # TODO (Q1.3): Map pixels to points on the image plane at Z=1
-    pass
+    ndc_points = torch.cat(
+        [xy_grid, torch.ones_like(xy_grid[..., :1])],
+        dim=-1
+    )
 
     ndc_points = torch.cat(
         [
@@ -129,14 +135,19 @@ def get_rays_from_pixels(xy_grid, image_size, camera):
         dim=-1
     )
 
-    # TODO (Q1.3): Use camera.unproject to get world space points from NDC space points
-    pass
+    world_points = camera.unproject_points(
+        ndc_points,
+        world_coordinates=True,
+        from_ndc=True
+    )
 
-    # TODO (Q1.3): Get ray origins from camera center
-    pass
+    rays_o = camera.get_camera_center().expand_as(world_points)
 
-    # TODO (Q1.3): Get ray directions as image_plane_points - rays_o
-    pass
+    rays_d = world_points - rays_o
+    rays_d = torch.nn.functional.normalize(
+        rays_d,
+        dim=-1,
+    )
 
     # Create and return RayBundle
     return RayBundle(

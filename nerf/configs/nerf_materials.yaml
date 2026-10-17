@@ -10,7 +10,7 @@ training:
   lr_scheduler_step_size: 50
   lr_scheduler_gamma: 0.8
 
-  checkpoint_path: ./checkpoints
+  checkpoint_path: ./checkpoints_materials_viewdep
   checkpoint_interval: 50
   resume: True
 

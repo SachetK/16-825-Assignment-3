@@ -35,8 +35,10 @@ from dataset import (
     get_nerf_datasets,
     trivial_collate,
 )
-from render_functions import render_geometry
+from render_functions import render_geometry, render_points
 
+# Box center: (0.2502276599407196, 0.25057265162467957, -0.0004569688462652266)
+# Box side lengths: (2.005113363265991, 1.5035921335220337, 1.5033526420593262)
 
 # Model class containing:
 #   1) Implicit volume defining the scene
@@ -95,38 +97,44 @@ def render_images(
 
         torch.cuda.empty_cache()
         camera = camera.to(device)
-        xy_grid = get_pixels_from_image(image_size, camera) # TODO (Q1.3): implement in ray_utils.py
-        ray_bundle = get_rays_from_pixels(xy_grid, image_size, camera) # TODO (Q1.3): implement in ray_utils.py
+        xy_grid = get_pixels_from_image(image_size, camera)
+        ray_bundle = get_rays_from_pixels(xy_grid, image_size, camera)
 
-        # TODO (Q1.3): Visualize xy grid using vis_grid
         if cam_idx == 0 and file_prefix == '':
-            pass
+            grid = vis_grid(xy_grid, image_size)
+            plt.imsave('images/grid.png', grid)
 
-        # TODO (Q1.3): Visualize rays using vis_rays
         if cam_idx == 0 and file_prefix == '':
-            pass
+            rays = vis_rays(ray_bundle, image_size)
+            plt.imsave('images/rays.png', rays)
         
-        # TODO (Q1.4): Implement point sampling along rays in sampler.py
-        pass
+        ray_bundle = model.sampler.forward(ray_bundle)
 
-        # TODO (Q1.4): Visualize sample points as point cloud
         if cam_idx == 0 and file_prefix == '':
-            pass
+            sample_points = ray_bundle.sample_points.view(1, -1, 3)
+            render_points('images/sample_points.png', sample_points)
 
-        # TODO (Q1.5): Implement rendering in renderer.py
         out = model(ray_bundle)
 
         # Return rendered features (colors)
-        image = np.array(
-            out['feature'].view(
-                image_size[1], image_size[0], 3
-            ).detach().cpu()
-        )
+        image = out['feature'].view(
+            image_size[1], image_size[0], 3
+        ).detach().cpu().numpy()
+
         all_images.append(image)
 
-        # TODO (Q1.5): Visualize depth
         if cam_idx == 2 and file_prefix == '':
-            pass
+            depth = out["depth"].view(
+                image_size[1], image_size[0]
+            ).detach().cpu().numpy()
+
+            plt.imsave(
+                "images/depth.png",
+                depth,
+                cmap="viridis",
+                vmin=model.sampler.min_depth,
+                vmax=model.sampler.max_depth,
+            )
 
         # Save
         if save:
@@ -201,8 +209,7 @@ def train(
             # Run model forward
             out = model(ray_bundle)
 
-            # TODO (Q2.2): Calculate loss
-            loss = None
+            loss = torch.nn.MSELoss()(out['feature'], rgb_gt)
 
             # Backprop
             optimizer.zero_grad()
@@ -321,8 +328,7 @@ def train_nerf(
             # Run model forward
             out = model(ray_bundle)
 
-            # TODO (Q3.1): Calculate loss
-            loss = None
+            loss = torch.nn.MSELoss()(out['feature'], rgb_gt)
 
             if cfg.renderer.type == 'volume_sdf':
                 loss += cfg.training.eikonal_weight * get_eikonal_loss(

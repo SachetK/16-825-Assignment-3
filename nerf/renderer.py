@@ -1,8 +1,5 @@
 import torch
 
-from typing import List, Optional, Tuple
-from pytorch3d.renderer.cameras import CamerasBase
-
 
 # Volume renderer which integrates color and density along rays
 # according to the equations defined in [Mildenhall et al. 2020]
@@ -22,21 +19,26 @@ class VolumeRenderer(torch.nn.Module):
         rays_density: torch.Tensor,
         eps: float = 1e-10
     ):
-        # TODO (1.5): Compute transmittance using the equation described in the README
-        pass
+        alpha = 1.0 - torch.exp(-rays_density * deltas)
+        transmittance = torch.cumprod(
+            torch.cat(
+                [
+                    torch.ones_like(alpha[:, :1]),
+                    1.0 - alpha + eps
+                ],
+                dim=1
+            ),
+            dim=1
+        )[:, :-1]
 
-        # TODO (1.5): Compute weight used for rendering from transmittance and alpha
-        return weights
+        return transmittance * alpha
     
     def _aggregate(
         self,
         weights: torch.Tensor,
         rays_feature: torch.Tensor
     ):
-        # TODO (1.5): Aggregate (weighted sum of) features using weights
-        pass
-
-        return feature
+        return torch.sum(weights * rays_feature, dim=1)
 
     def forward(
         self,
@@ -75,13 +77,17 @@ class VolumeRenderer(torch.nn.Module):
             weights = self._compute_weights(
                 deltas.view(-1, n_pts, 1),
                 density.view(-1, n_pts, 1)
-            ) 
+            )
 
-            # TODO (1.5): Render (color) features using weights
-            pass
+            feature = self._aggregate(
+                weights,
+                feature.view(-1, n_pts, feature.shape[-1]),
+            )
 
-            # TODO (1.5): Render depth map
-            pass
+            depth = self._aggregate(
+                weights,
+                cur_ray_bundle.sample_lengths.view(-1, n_pts, 1),
+            )
 
             # Return
             cur_out = {
@@ -103,8 +109,11 @@ class VolumeRenderer(torch.nn.Module):
 
 
 def sdf_to_density(signed_distance, alpha, beta):
-    # TODO (Q4.3): Convert signed distance to density with alpha, beta parameters
-    pass
+    return torch.where(
+        signed_distance > 0,
+        0.5 * torch.exp(-signed_distance / beta),
+        1.0 - 0.5 * torch.exp(signed_distance / beta)
+    ) * alpha
 
 class VolumeSDFRenderer(VolumeRenderer):
     def __init__(
@@ -141,7 +150,7 @@ class VolumeSDFRenderer(VolumeRenderer):
 
             # Call implicit function with sample points
             distance, color = implicit_fn.get_distance_color(cur_ray_bundle.sample_points)
-            density = None # TODO (Q4.3): convert SDF to density
+            density = sdf_to_density(distance, self.alpha, self.beta)
 
             # Compute length of each ray segment
             depth_values = cur_ray_bundle.sample_lengths[..., 0]
