@@ -12,34 +12,31 @@ from data_utils import TruckDataset, visualize_renders
 from skimage.metrics import peak_signal_noise_ratio, structural_similarity
 
 def make_trainable(gaussians):
+    attrs = ["means", "pre_act_scales", "colours", "pre_act_opacities"]
 
-    ### YOUR CODE HERE ###
-    # HINT: You can access and modify parameters from gaussians
-    pass
+    if not gaussians.is_isotropic:
+        attrs += ["pre_act_quats"]
+
+    for attr in attrs:
+        param = getattr(gaussians, attr)
+        setattr(param, 'requires_grad', True)
+
 
 def setup_optimizer(gaussians):
-
     gaussians.check_if_trainable()
 
-    ### YOUR CODE HERE ###
-    # HINT: Modify the learning rates to reasonable values. We have intentionally
-    # set very high learning rates for all parameters.
-    # HINT: Consider reducing the learning rates for parameters that seem to vary too
-    # fast with the default settings.
-    # HINT: Consider setting different learning rates for different sets of parameters.
     parameters = [
         {'params': [gaussians.pre_act_opacities], 'lr': 0.05, "name": "opacities"},
-        {'params': [gaussians.pre_act_scales], 'lr': 0.05, "name": "scales"},
-        {'params': [gaussians.colours], 'lr': 0.05, "name": "colours"},
-        {'params': [gaussians.means], 'lr': 0.05, "name": "means"},
+        {'params': [gaussians.pre_act_scales], 'lr': 0.0005, "name": "scales"},
+        {'params': [gaussians.colours], 'lr': 0.01, "name": "colours"},
+        {'params': [gaussians.means], 'lr': 0.0002, "name": "means"},
     ]
+
     optimizer = torch.optim.Adam(parameters, lr=0.0, eps=1e-15)
-    optimizer = None
 
     return optimizer
 
 def run_training(args):
-
     if not os.path.exists(args.out_path):
         os.makedirs(args.out_path, exist_ok=True)
 
@@ -97,19 +94,16 @@ def run_training(args):
         if gt_mask is not None:
             gt_mask = gt_mask[0].cuda()
 
-        # Rendering scene using gaussian splatting
-        ### YOUR CODE HERE ###
-        # HINT: Can any function from the Scene class help?
-        # HINT: Set bg_colour to (0.0, 0.0, 0.0)
-        # HINT: Get img_size from train_dataset
-        # HINT: Get per_splat from args.gaussians_per_splat
-        # HINT: camera is available above
-        pred_img = None
+        pred_img, pred_depth, pred_mask = scene.render(
+            camera=camera,
+            per_splat=args.gaussians_per_splat,
+            img_size=train_dataset.img_size,
+            bg_colour=(0.0, 0.0, 0.0)
+        )
 
-        # Compute loss
-        ### YOUR CODE HERE ###
-        # HINT: A simple standard loss function should work.
-        loss = None
+        loss = torch.nn.MSELoss()(pred_img, gt_img)
+        if gt_mask is not None:
+            loss += torch.nn.MSELoss()(pred_mask, gt_mask)
 
         loss.backward()
         optimizer.step()
@@ -144,14 +138,12 @@ def run_training(args):
 
         with torch.no_grad():
 
-            # Rendering scene using gaussian splatting
-            ### YOUR CODE HERE ###
-            # HINT: Can any function from the Scene class help?
-            # HINT: Set bg_colour to (0.0, 0.0, 0.0)
-            # HINT: Get img_size from train_dataset
-            # HINT: Get per_splat from args.gaussians_per_splat
-            # HINT: camera is available above
-            pred_img = None
+            pred_img, pred_depth, pred_mask = scene.render(
+                camera=camera,
+                img_size=train_dataset.img_size,
+                per_splat=args.gaussians_per_splat,
+                bg_colour=(0.0, 0.0, 0.0)
+            )
 
         pred_npy = pred_img.detach().cpu().numpy()
         pred_npy = (np.clip(pred_npy, 0.0, 1.0) * 255.0).astype(np.uint8)
@@ -171,15 +163,12 @@ def run_training(args):
             gt_mask = gt_mask[0].cuda()
 
         with torch.no_grad():
-
-            # Rendering scene using gaussian splatting
-            ### YOUR CODE HERE ###
-            # HINT: Can any function from the Scene class help?
-            # HINT: Set bg_colour to (0.0, 0.0, 0.0)
-            # HINT: Get img_size from test_dataset
-            # HINT: Get per_splat from args.gaussians_per_splat
-            # HINT: camera is available above
-            pred_img = None
+            pred_img, pred_depth, pred_mask = scene.render(
+                camera=camera,
+                img_size=train_dataset.img_size,
+                per_splat=args.gaussians_per_splat,
+                bg_colour=(0.0, 0.0, 0.0)
+            )
 
             gt_npy = gt_img.detach().cpu().numpy()
             pred_npy = pred_img.detach().cpu().numpy()
@@ -230,6 +219,15 @@ def get_args():
     return args
 
 if __name__ == "__main__":
-
     args = get_args()
     run_training(args)
+
+# Without view dependence:
+# [*] Evaluation --- Mean PSNR: 29.399
+# [*] Evaluation --- Mean SSIM: 0.936
+# Trained for 1000 epochs
+
+# With view dependence
+# [*] Evaluation --- Mean PSNR: 29.586
+# [*] Evaluation --- Mean SSIM: 0.938
+# Trained for 1000 epochs

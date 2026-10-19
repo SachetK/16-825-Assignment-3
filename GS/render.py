@@ -38,7 +38,6 @@ def create_renders(args):
 
     imgs = []
     for i in tqdm(range(num_views), desc="Rendering"):
-
         dist = 6.0
         R, T = look_at_view_transform(dist = dist, azim=azims[i], elev=elevs[i], up=((0, -1, 0),))
         camera = PerspectiveCameras(
@@ -54,7 +53,12 @@ def create_renders(args):
             # HINT: Set bg_colour to (1.0, 1.0, 1.0)
             # HINT: Get per_splat from args.gaussians_per_splat
             # HINT: img_size and camera are available above
-            img, depth, mask = None
+            img, depth, mask = scene.render(
+                camera=camera,
+                per_splat=args.gaussians_per_splat,
+                img_size=img_size,
+                bg_colour=(1.0, 1.0, 1.0),
+            )
 
         debug_path = os.path.join(debug_root, f"{i:03d}.png")
         img = img.detach().cpu().numpy()
@@ -78,7 +82,6 @@ def create_renders(args):
     imageio.mimwrite(gif_path, imgs, duration=1000.0*(1/10.0), loop=0)
 
 def get_args():
-
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--out_path", default="./output", type=str,

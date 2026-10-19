@@ -8,13 +8,34 @@ from PIL import Image
 from plyfile import PlyData
 from torch.utils.data import Dataset
 from pytorch3d.renderer.cameras import PerspectiveCameras, look_at_view_transform
+import math
 
-SH_C0 = 0.28209479177387814
+SH_C0 = 1 / (2 * math.sqrt(math.pi))
+
+SH_C1 = math.sqrt(3 / (4 * math.pi))
+
+SH_C2 = [
+    math.sqrt(15 / (4 * math.pi)),
+    math.sqrt(15 / (4 * math.pi)),
+    math.sqrt(5 / (16 * math.pi)),
+    math.sqrt(15 / (4 * math.pi)),
+    math.sqrt(15 / (16 * math.pi)),
+]
+
+SH_C3 = [
+    math.sqrt(35 / (32 * math.pi)),
+    math.sqrt(105 / (4 * math.pi)),
+    math.sqrt(21 / (64 * math.pi)),
+    math.sqrt(7 / (16 * math.pi)),
+    math.sqrt(21 / (64 * math.pi)),
+    math.sqrt(105 / (16 * math.pi)),
+    math.sqrt(35 / (32 * math.pi)),
+]
+
 CMAP_JET = plt.get_cmap("jet")
 CMAP_MIN_NORM, CMAP_MAX_NORM = 5.0, 7.0
 
 class TruckDataset(Dataset):
-
     def __init__(self, root, split):
         super().__init__()
         self.root = root
@@ -116,7 +137,6 @@ def colour_depth_render(depth):
     return coloured_depth
 
 def visualize_renders(scene, gt_viz_img, cameras, img_size):
-
     imgs = []
     viz_size = (256, 256)
     with torch.no_grad():
@@ -209,6 +229,39 @@ def colours_from_spherical_harmonics(spherical_harmonics, gaussian_dirs):
         colours                 :   A torch.Tensor of shape (N, 3) representing the view dependent
                                     RGB colour.
     """
-    ### YOUR CODE HERE ###
-    colours = None
-    return colours
+    dirs = torch.nn.functional.normalize(gaussian_dirs, dim=-1)
+    x, y, z = dirs.unbind(dim=-1)
+
+    basis = torch.stack([
+        # Degree 0
+        SH_C0 * torch.ones_like(x),
+
+        # Degree 1
+        -SH_C1 * y,
+        SH_C1 * z,
+        -SH_C1 * x,
+
+        # Degree 2
+        SH_C2[0] * x * y,
+        -SH_C2[1] * y * z,
+        SH_C2[2] * (2 * z * z - x * x - y * y),
+        -SH_C2[3] * x * z,
+        SH_C2[4] * (x * x - y * y),
+
+        # Degree 3
+        -SH_C3[0] * y * (3 * x * x - y * y),
+        SH_C3[1] * x * y * z,
+        -SH_C3[2] * y * (4 * z * z - x * x - y * y),
+        SH_C3[3] * z * (2 * z * z - 3 * x * x - 3 * y * y),
+        -SH_C3[4] * x * (4 * z * z - x * x - y * y),
+        SH_C3[5] * z * (x * x - y * y),
+        -SH_C3[6] * x * (x * x - 3 * y * y),
+    ], dim=-1)
+
+    # Assumes coefficients are stored as 16 groups of RGB
+    sh = spherical_harmonics.reshape(-1, 16, 3)
+
+    # Weighted sum over the 16 basis functions
+    colours = (basis.unsqueeze(-1) * sh).sum(dim=1)
+
+    return colours.clip(0.0, 1.0)
