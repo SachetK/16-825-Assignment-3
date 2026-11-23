@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>16-825 Assignment 3</title>
+  <style>
+    body { max-width: 960px; margin: 40px auto; padding: 0 20px; font: 16px/1.5 Arial, sans-serif; color: #222; }
+    h1 { margin-bottom: 0; }
+    h2 { margin-top: 50px; padding-bottom: 5px; border-bottom: 1px solid #aaa; }
+    h3 { margin-top: 32px; }
+    img { max-width: 100%; height: auto; margin: 8px 0 20px; }
+    .plot { max-width: 650px; }
+    .small { max-width: 460px; }
+    table { border-collapse: collapse; margin: 20px 0; }
+    th, td { padding: 7px 10px; border: 1px solid #999; text-align: left; }
+    th { background: #eee; }
+    .comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .comparison h3 { margin-bottom: 0; }
+    code { background: #f3f3f3; padding: 1px 4px; }
+    @media (max-width: 650px) { .comparison { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <h1>16-825 Assignment 3: Volume Rendering, NeRF, and 3D Gaussian Splatting</h1>
+  <p>Andrew ID: skorada</p>
+
+  <h2>1. Differentiable volume rendering</h2>
+
+  <h3>1.3 Ray sampling</h3>
+  <p>I generated one NDC coordinate for every image pixel, unprojected those points through the camera, and formed normalized world-space ray directions from the camera center.</p>
+  <div class="comparison">
+    <div><h3>Pixel grid</h3><img src="data/grid.png" alt="Normalized image-coordinate grid"></div>
+    <div><h3>Camera rays</h3><img src="data/rays.png" alt="World-space camera rays"></div>
+  </div>
+
+  <h3>1.4 Point sampling</h3>
+  <p>I sampled uniformly spaced depths between the near and far planes and evaluated each point as <code>origin + depth * direction</code>.</p>
+  <img class="plot" src="data/sample-points.png" alt="Stratified samples along camera rays">
+
+  <h3>1.5 Volume rendering</h3>
+  <p>For each ray I computed alpha from density and segment length, accumulated exclusive transmittance, and used the resulting weights to aggregate both color and depth.</p>
+  <div class="comparison">
+    <div><h3>Rendered box</h3><img src="data/part-1.gif" alt="Spiral volume rendering of a box"></div>
+    <div><h3>Normalized depth</h3><img src="data/depth.png" alt="Normalized depth map"></div>
+  </div>
+
+  <h2>2. Optimizing a basic implicit volume</h2>
+  <p>I trained the box with random ray batches and mean-squared color error. The learned center was <strong>(0.25, 0.25, 0.00)</strong> and its side lengths were <strong>(2.01, 1.50, 1.50)</strong>, rounded to two decimals.</p>
+  <div class="comparison">
+    <div><h3>Before training</h3><img src="data/box-before.png" alt="Box before optimization"></div>
+    <div><h3>After training</h3><img src="data/box-after.png" alt="Box after optimization"></div>
+  </div>
+  <img class="small" src="data/part-2.gif" alt="Spiral rendering of the optimized box">
+
+  <h2>3. Neural Radiance Field</h2>
+  <p>The NeRF uses harmonic position encoding followed by an MLP that predicts nonnegative density and sigmoid-bounded RGB. It was optimized from posed RGB views using mean-squared error.</p>
+  <img class="small" src="data/part-3.gif" alt="Novel-view rendering from the trained NeRF">
+
+  <h2>4. NeRF extensions</h2>
+
+  <h3>4.1 View dependence</h3>
+  <p>I separated density from appearance and conditioned the color head on the viewing direction using a two-frequency harmonic embedding. Position still determines density, while the direction branch lets specular appearance change across views. The result below uses the materials scene.</p>
+  <img class="small" src="data/materials.gif" alt="View-dependent NeRF on the materials scene">
+  <p>View conditioning represents reflections more faithfully, but it also increases model capacity: the network can explain training images with direction-specific colors instead of consistent geometry. Limiting the direction encoding to fewer frequencies helps retain generalization to unseen views.</p>
+
+  <h3>4.3 VolSDF</h3>
+  <p>I represented geometry with a neural signed-distance field, added an Eikonal penalty that encourages gradient norm one, and mapped signed distance to density with the VolSDF cumulative-Laplace formulation. The color MLP is evaluated at the same sampled positions.</p>
+  <div class="comparison">
+    <div><h3>Extracted geometry</h3><img src="data/volsdf-geometry.gif" alt="Geometry extracted from the learned SDF"></div>
+    <div><h3>Rendered color</h3><img src="data/volsdf-color.gif" alt="Color rendering from VolSDF"></div>
+  </div>
+  <p><strong>Alpha</strong> scales the maximum density and therefore the amount of opacity a surface can accumulate. <strong>Beta</strong> controls the width of the transition around the zero level set. A low beta produces a sharper, more surface-like density; a high beta spreads density across a thicker region and biases learning toward smoother, less precisely localized surfaces. High beta is generally easier to optimize because more samples receive useful gradients, while low beta is more likely to yield an accurate surface once training succeeds.</p>
+
+  <p>I ran a 25-epoch ablation over the Eikonal weight, alpha, and beta. Raising alpha from 10 to 20 gave the best validation PSNR, <strong>20.65 dB</strong>. A high beta produced a much denser, noisier extracted mesh and the lowest planarity score.</p>
+  <table>
+    <thead><tr><th>Setting</th><th>Eikonal weight</th><th>Alpha</th><th>Beta</th><th>Val. PSNR</th><th>Mesh vertices</th></tr></thead>
+    <tbody>
+      <tr><td>Baseline</td><td>0.02</td><td>10</td><td>0.05</td><td>20.05</td><td>1,884</td></tr>
+      <tr><td>Low Eikonal</td><td>0.005</td><td>10</td><td>0.05</td><td>20.43</td><td>2,003</td></tr>
+      <tr><td>High alpha</td><td>0.02</td><td>20</td><td>0.05</td><td><strong>20.65</strong></td><td>1,886</td></tr>
+      <tr><td>Low beta</td><td>0.02</td><td>10</td><td>0.02</td><td>20.12</td><td>2,280</td></tr>
+      <tr><td>High beta</td><td>0.02</td><td>10</td><td>0.10</td><td>19.72</td><td>22,919</td></tr>
+    </tbody>
+  </table>
+  <div class="comparison">
+    <div><h3>Baseline</h3><img src="data/volsdf-baseline.png" alt="Baseline VolSDF geometry"></div>
+    <div><h3>High alpha</h3><img src="data/volsdf-alpha-high.png" alt="High-alpha VolSDF geometry"></div>
+    <div><h3>Low Eikonal weight</h3><img src="data/volsdf-eikonal-low.png" alt="Low-Eikonal-weight VolSDF geometry"></div>
+    <div><h3>High beta</h3><img src="data/volsdf-beta-high.png" alt="High-beta VolSDF geometry"></div>
+  </div>
+
+  <h2>5. 3D Gaussian rasterization</h2>
+  <p>I projected each 3D covariance into the image plane with the camera Jacobian, evaluated the resulting 2D Gaussians per pixel, depth-sorted visible splats, and composited color, depth, and silhouette front to back.</p>
+  <img src="data/gaussian-render.gif" alt="Rendering of pretrained 3D Gaussians">
+
+  <h2>6. Training a 3D Gaussian representation</h2>
+  <p>I trained isotropic Gaussians for <strong>1,000 iterations</strong> with an RGB MSE loss plus mask MSE. Adam learning rates were 0.05 for opacity, 0.0005 for scale, 0.01 for color, and 0.0002 for position. Held-out performance was <strong>29.399 dB PSNR</strong> and <strong>0.936 SSIM</strong>.</p>
+  <div class="comparison">
+    <div><h3>Training progress</h3><img src="data/gaussian-training.gif" alt="3D Gaussian training progress and ground truth"></div>
+    <div><h3>Final training-view renders</h3><img src="data/gaussian-final.gif" alt="Final renders of the optimized Gaussians"></div>
+  </div>
+
+  <h2>7.1 Spherical-harmonic rendering</h2>
+  <p>I evaluated all degree-three spherical-harmonic coefficients against the normalized camera-to-Gaussian direction, producing a different RGB value for each Gaussian at each view. The view-dependent version reached <strong>29.586 dB PSNR</strong> and <strong>0.938 SSIM</strong>, a small improvement over the DC-only model.</p>
+  <div class="comparison">
+    <div><h3>DC component only</h3><img src="data/gaussian-render.gif" alt="Gaussian rendering using only DC color"></div>
+    <div><h3>All SH coefficients</h3><img src="data/gaussian-render-sh.gif" alt="View-dependent Gaussian rendering using spherical harmonics"></div>
+  </div>
+
+  <h3>Matched-frame comparisons</h3>
+  <p>In the first view, spherical harmonics recover stronger local highlights and more varied surface color; DC-only rendering averages these effects into flatter tones.</p>
+  <div class="comparison"><img src="data/dc-000.png" alt="Frame 0, DC only"><img src="data/sh-000.png" alt="Frame 0, spherical harmonics"></div>
+  <p>At the side view, the SH image changes the highlight pattern with the camera direction and preserves more contrast on oblique surfaces.</p>
+  <div class="comparison"><img src="data/dc-008.png" alt="Frame 8, DC only"><img src="data/sh-008.png" alt="Frame 8, spherical harmonics"></div>
+  <p>From the opposite view, the direction-dependent colors move with the viewpoint rather than remaining baked into each Gaussian, producing a more convincing appearance.</p>
+  <div class="comparison"><img src="data/dc-016.png" alt="Frame 16, DC only"><img src="data/sh-016.png" alt="Frame 16, spherical harmonics"></div>
+</body>
+</html>
